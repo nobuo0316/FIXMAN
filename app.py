@@ -1,58 +1,53 @@
 import streamlit as st
-import ast
+import re
 
-def fix_fstring_newlines(code):
-    try:
-        # コードを抽象構文木(AST)に変換
-        tree = ast.parse(code)
-        
-        for node in ast.walk(tree):
-            # f-string (JoinedStr) を探す
-            if isinstance(node, ast.JoinedStr):
-                for value in node.values:
-                    # f-string内の固定テキスト部分 (Constant)
-                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                        # 実際の改行文字をエスケープ文字 "\\n" に置換
-                        # これにより、物理的な改行がコード上の一行に収まる
-                        value.value = value.value.replace('\n', '\\n')
-        
-        # Python 3.9以降の標準機能でソースコードに戻す
-        return ast.unparse(tree)
-    except SyntaxError as e:
-        return f"構文エラー: {e.msg} (line {e.lineno})"
-    except Exception as e:
-        return f"予期せぬエラーが発生しました: {e}"
+def fix_fstring_raw_text(code):
+    # f-string (f'...' または f"...") の中身を探す正規表現
+    # 1. f'...' のパターン
+    # 2. f"..." のパターン
+    # それぞれの内部にある「本物の改行」を "\\n" に置換する
+    
+    def replace_newline(match):
+        full_match = match.group(0)
+        # 文字列の中身だけ取り出して改行を置換
+        return full_match.replace('\n', '\\n')
+
+    # 非強欲マッチングで f'...' と f"..." を抽出
+    # ※トリプルクォートは対象外にする（それ自体は文法的にOKなため）
+    pattern_single = r"f'[^']*'"
+    pattern_double = r'f"[^"]*"'
+    
+    # 改行を含む可能性があるので re.DOTALL を使用
+    fixed_code = re.sub(r"f'[^']+'", replace_newline, code, flags=re.DOTALL)
+    fixed_code = re.sub(r'f"[^"]+"', replace_newline, fixed_code, flags=re.DOTALL)
+    
+    return fixed_code
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="f-string Newline Fixer", layout="wide")
+st.set_page_config(page_title="f-string Emergency Fixer", layout="wide")
+st.title("🛠 f-string 構文エラー修正ツール")
+st.warning("`unterminated f-string` エラーが出るコードを強制的に1行に直します。")
 
-st.title("🐍 f-string 改行修正ツール")
-st.info("f-string内にある物理的な改行を、自動で `\\n` 文字に書き換えます。")
-
-uploaded_file = st.file_uploader("Pythonファイルをアップロード (.py)", type=["py"])
+uploaded_file = st.file_uploader("Pythonファイルをアップロード", type=["py"])
 
 if uploaded_file:
-    # ファイル読み込み
     content = uploaded_file.read().decode("utf-8")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("修正前")
+        st.subheader("修正前 (Error Line: 1340付近)")
         st.code(content, language="python")
 
-    # 変換処理
-    fixed_code = fix_fstring_newlines(content)
+    # 正規表現による強制置換
+    fixed_code = fix_fstring_raw_text(content)
     
     with col2:
         st.subheader("修正後")
-        if fixed_code.startswith("構文エラー") or fixed_code.startswith("予期せぬエラー"):
-            st.error(fixed_code)
-        else:
-            st.code(fixed_code, language="python")
-            st.download_button(
-                label="修正済みファイルをダウンロード",
-                data=fixed_code,
-                file_name=f"fixed_{uploaded_file.name}",
-                mime="text/x-python"
-            )
+        st.code(fixed_code, language="python")
+        st.download_button(
+            label="修正済みファイルを保存",
+            data=fixed_code,
+            file_name=f"fixed_{uploaded_file.name}",
+            mime="text/x-python"
+        )
